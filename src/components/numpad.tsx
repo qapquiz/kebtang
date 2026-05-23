@@ -1,5 +1,4 @@
 import { StyleSheet, Text, Pressable } from "react-native";
-import type { GestureResponderEvent } from "react-native";
 import { Spacing } from "../constants/theme";
 import { useTheme } from "../hooks/use-theme";
 
