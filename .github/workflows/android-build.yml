@@ -38,7 +38,7 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: 🛠 Build Android app locally on CI
-        run: bunx eas-cli build --platform android --local --profile development --non-interactive
+        run: bunx eas-cli build --platform android --local --profile preview --non-interactive
 
       - name: 📤 Upload APK Artifact
         uses: actions/upload-artifact@v4
