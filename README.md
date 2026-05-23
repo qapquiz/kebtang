@@ -1,56 +1,84 @@
-# Welcome to your Expo app 👋
+# kebtang
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A fast, minimal expense tracker built with Expo. No accounts, no cloud, no chores — just open, type an amount, tap a category, done.
 
-## Get started
+## The Two-Tap Flow
 
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```
+Open app → Type amount → Tap category emoji → ✅ Saved
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+No save button. No required fields. No confirmation dialogs. The entry appears instantly in the list below.
 
-### Other setup steps
+## Tech Stack
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+| Layer | Technology |
+|---|---|
+| Framework | Expo 56, React 19, React Native 0.85 |
+| Navigation | expo-router (file-based, NativeTabs) |
+| State | React hooks + Effect-TS services |
+| Storage | expo-sqlite (local-first, offline) |
+| Architecture | Effect-TS (Layer, Context.Tag, Effect) |
+| Language | TypeScript |
 
-## Learn more
+## Project Structure
 
-To learn more about developing your project with Expo, look at the following resources:
+```
+src/
+├── app/                    # Routes (expo-router)
+│   ├── _layout.tsx         # Root layout + DB initialization
+│   ├── index.tsx           # Home — numpad + categories + today's list
+│   └── history.tsx         # History — grouped by day
+├── components/             # UI components
+│   ├── amount-display.tsx  # Large amount + today's total
+│   ├── category-bar.tsx    # Horizontal emoji picker
+│   ├── numpad.tsx          # Circular numpad
+│   ├── expense-item.tsx    # Single expense row (long press to delete)
+│   ├── expense-list.tsx    # Scrollable expense list
+│   └── undo-toast.tsx      # Undo deletion toast
+├── hooks/
+│   ├── use-categories.ts   # Category data hook
+│   └── use-expenses.ts     # Expense CRUD hook with optimistic updates
+├── lib/
+│   ├── domain/             # Pure types (Expense, Category, errors)
+│   ├── services/           # Effect-TS service layers
+│   │   ├── database.ts     # expo-sqlite wrapper (Context.Tag)
+│   │   ├── category-repository.ts
+│   │   └── expense-repository.ts
+│   └── runtime.ts          # Effect runtime + runEffect helper
+└── constants/
+    └── theme.ts            # Colors, spacing, design tokens
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Architecture
 
-## Join the community
+The app uses **Effect-TS** for a clean, testable service layer:
 
-Join our community of developers creating universal apps.
+- **`Context.Tag`** — type-safe dependency injection for Database, ExpenseRepository, CategoryRepository
+- **`Layer`** — composable service providers (swappable for tests or in-memory implementations)
+- **`Effect.gen`** — typed-error async pipelines (all DB ops return `Effect<_, DatabaseError>`)
+- **`Data.TaggedError`** — structured, discriminable error types
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+React hooks call `runEffect()` which automatically provides all service layers.
+
+## Design Decisions
+
+- **Amounts stored as cents** (integers) — no floating point bugs
+- **Optimistic updates** — instant UI, DB writes in background
+- **No save button** — tapping a category IS the save action
+- **Undo toast** instead of confirmation dialogs
+- **No auth, no cloud, no onboarding** — works immediately
+- **Long press to delete** with undo
+
+## Categories
+
+🍔 Food · ☕ Coffee · 🚗 Transport · 🛒 Groceries · 🎬 Entertainment · 💊 Health · 🏠 Housing · 👕 Shopping · 💡 Bills · 📦 Other
+
+## Getting Started
+
+```bash
+bun install
+bun start
+```
+
+Then press `i` for iOS simulator, `a` for Android emulator, or `w` for web.
