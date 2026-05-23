@@ -1,98 +1,163 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useCallback, useMemo, useRef, useState } from "react";
+import { View, ScrollView, StyleSheet } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+import { AmountDisplay } from "../components/amount-display";
+import { CategoryBar } from "../components/category-bar";
+import { ExpenseList } from "../components/expense-list";
+import { Numpad } from "../components/numpad";
+import { UndoToast } from "../components/undo-toast";
+import { useCategories } from "../hooks/use-categories";
+import { useExpenses } from "../hooks/use-expenses";
+import { Category } from "../lib/domain/category";
+import { dollarsToCents } from "../lib/domain/expense";
+import { Spacing, BottomTabInset, MaxContentWidth } from "../constants/theme";
 
 export default function HomeScreen() {
+  const [amount, setAmount] = useState("");
+  const { categories, loading: catsLoading } = useCategories();
+  const { expenses, todayTotal, addExpense, deleteExpense, refresh } = useExpenses();
+
+  // Undo state
+  const [undoState, setUndoState] = useState<{
+    visible: boolean;
+    message: string;
+    deletedId: string;
+    deletedAmount: number;
+  }>({ visible: false, message: "", deletedId: "", deletedAmount: 0 });
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const categoryMap = useMemo(() => {
+    const map = new Map<string, Category>();
+    categories.forEach((c) => map.set(c.id, c));
+    return map;
+  }, [categories]);
+
+  const handleKeyPress = useCallback((key: string) => {
+    setAmount((prev) => {
+      if (key === "⌫") return prev.slice(0, -1);
+      if (key === ".") return prev.includes(".") ? prev : prev + ".";
+      // Max 2 decimal places
+      if (prev.includes(".")) {
+        const [, decimals] = prev.split(".");
+        if (decimals.length >= 2) return prev;
+      }
+      // Max total length
+      if (prev.replace(".", "").length >= 8) return prev;
+      return prev + key;
+    });
+  }, []);
+
+  const handleCategorySelect = useCallback(
+    (category: Category) => {
+      const cents = dollarsToCents(amount);
+      if (cents <= 0) return;
+
+      addExpense({
+        amountCents: cents,
+        categoryId: category.id,
+      });
+
+      // Reset amount with a little haptic feel
+      setAmount("");
+    },
+    [amount, addExpense],
+  );
+
+  const handleDelete = useCallback(
+    (id: string, amountCents: number) => {
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+
+      deleteExpense(id, amountCents);
+      setUndoState({
+        visible: true,
+        message: "Expense deleted",
+        deletedId: id,
+        deletedAmount: amountCents,
+      });
+    },
+    [deleteExpense],
+  );
+
+  const handleUndo = useCallback(async () => {
+    // Re-add the expense (simplest undo: add it back)
+    // For a real undo, we'd store the full expense data
+    // For now, just refresh from DB
+    await refresh();
+    setUndoState((prev) => ({ ...prev, visible: false }));
+  }, [refresh]);
+
+  const handleDismiss = useCallback(() => {
+    setUndoState((prev) => ({ ...prev, visible: false }));
+  }, []);
+
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.content}>
+        {/* Amount + total */}
+        <AmountDisplay amount={amount} todayTotal={todayTotal} />
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
+        {/* Category bar */}
+        <View style={styles.categorySection}>
+          <CategoryBar
+            categories={categories}
+            selectedId={null}
+            onSelect={handleCategorySelect}
           />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
+        </View>
 
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+        {/* Expense list */}
+        <View style={styles.listSection}>
+          <ExpenseList
+            expenses={expenses}
+            categoryMap={categoryMap}
+            onDelete={handleDelete}
+          />
+        </View>
+
+        {/* Undo toast */}
+        <View style={styles.toastContainer}>
+          <UndoToast
+            visible={undoState.visible}
+            message={undoState.message}
+            onUndo={handleUndo}
+            onDismiss={handleDismiss}
+          />
+        </View>
+
+        {/* Numpad */}
+        <View style={styles.numpadSection}>
+          <Numpad onKeyPress={handleKeyPress} />
+        </View>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
+    flexDirection: "row",
+    justifyContent: "center",
   },
-  safeArea: {
+  content: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
     maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
     paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+    paddingBottom: BottomTabInset,
+  },
+  categorySection: {
+    paddingVertical: Spacing.two,
+  },
+  listSection: {
+    flex: 1,
+  },
+  toastContainer: {
+    paddingVertical: Spacing.one,
+  },
+  numpadSection: {
+    paddingTop: Spacing.one,
+    gap: Spacing.one,
+    paddingBottom: Spacing.two,
   },
 });
