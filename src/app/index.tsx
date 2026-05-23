@@ -11,7 +11,7 @@ import { useCategories } from "../hooks/use-categories";
 import { useExpenses } from "../hooks/use-expenses";
 import { Category } from "../lib/domain/category";
 import { dollarsToCents } from "../lib/domain/expense";
-import { Spacing, BottomTabInset, MaxContentWidth } from "../constants/theme";
+import { Spacing, MaxContentWidth } from "../constants/theme";
 
 export default function HomeScreen() {
   const [amount, setAmount] = useState("");
@@ -66,15 +66,6 @@ export default function HomeScreen() {
         {/* Amount + total */}
         <AmountDisplay amount={amount} todayTotal={todayTotal} />
 
-        {/* Category bar */}
-        <View style={styles.categorySection}>
-          <CategoryBar
-            categories={categories}
-            selectedId={null}
-            onSelect={handleCategorySelect}
-          />
-        </View>
-
         {/* Expense list with swipe-to-delete */}
         <View style={styles.listSection}>
           <ExpenseList
@@ -85,12 +76,19 @@ export default function HomeScreen() {
         </View>
 
         {/* Undo toast */}
-        <View style={styles.toastContainer}>
-          <UndoToast
-            visible={undoVisible}
-            message="Expense deleted"
-            onUndo={undoDelete}
-            onDismiss={dismissUndo}
+        <UndoToast
+          visible={undoVisible}
+          message="Expense deleted"
+          onUndo={undoDelete}
+          onDismiss={dismissUndo}
+        />
+
+        {/* Category bar */}
+        <View style={styles.categorySection}>
+          <CategoryBar
+            categories={categories}
+            selectedId={null}
+            onSelect={handleCategorySelect}
           />
         </View>
 
@@ -113,20 +111,15 @@ const styles = StyleSheet.create({
     flex: 1,
     maxWidth: MaxContentWidth,
     paddingHorizontal: Spacing.three,
-    paddingBottom: BottomTabInset,
   },
   categorySection: {
     paddingVertical: Spacing.two,
   },
   listSection: {
     flex: 1,
-  },
-  toastContainer: {
-    paddingVertical: Spacing.one,
+    minHeight: 0,
   },
   numpadSection: {
-    paddingTop: Spacing.one,
     gap: Spacing.one,
-    paddingBottom: Spacing.two,
   },
 });

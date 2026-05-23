@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
+import { useFocusEffect } from "expo-router";
 import { Effect } from "effect";
 import { runEffect } from "../lib/runtime";
 import { ExpenseRepository } from "../lib/services/expense-repository";
@@ -75,9 +76,11 @@ export function useExpenseHistory(days: number = 30) {
     }
   }, [days]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+    }, [refresh]),
+  );
 
   return { groups, loading, refresh };
 }

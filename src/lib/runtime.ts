@@ -3,7 +3,12 @@ import { DatabaseLive } from "./services/database";
 import { CategoryRepositoryLive } from "./services/category-repository";
 import { ExpenseRepositoryLive } from "./services/expense-repository";
 
-const MainLayer = Layer.mergeAll(DatabaseLive, CategoryRepositoryLive, ExpenseRepositoryLive);
+const RepoLayer = Layer.merge(
+  CategoryRepositoryLive,
+  ExpenseRepositoryLive,
+);
+
+const MainLayer = Layer.provide(DatabaseLive)(RepoLayer);
 
 let _seeded = false;
 

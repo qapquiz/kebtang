@@ -4,6 +4,15 @@ import { Expense } from "../domain/expense";
 import type { ExpenseInsert } from "../domain/expense";
 import { DatabaseError } from "../domain/errors";
 
+/** UUID v4 — works in Hermes (no `crypto` global) */
+function uuid(): string {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export interface ExpenseRepositoryShape {
   readonly add: (params: ExpenseInsert) => Effect.Effect<Expense, DatabaseError>;
   readonly deleteById: (id: string) => Effect.Effect<void, DatabaseError>;
@@ -39,7 +48,7 @@ export const ExpenseRepositoryLive = Layer.effect(
     return ExpenseRepository.of({
       add: (params) =>
         Effect.gen(function* (_) {
-          const id = crypto.randomUUID();
+          const id = uuid();
           const now = Date.now();
           const date = params.date ?? now;
 
