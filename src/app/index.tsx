@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from "react";
-import { View, ScrollView, StyleSheet } from "react-native";
+import { useCallback, useMemo, useState } from "react";
+import { View, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AmountDisplay } from "../components/amount-display";
@@ -15,17 +15,16 @@ import { Spacing, BottomTabInset, MaxContentWidth } from "../constants/theme";
 
 export default function HomeScreen() {
   const [amount, setAmount] = useState("");
-  const { categories, loading: catsLoading } = useCategories();
-  const { expenses, todayTotal, addExpense, deleteExpense, refresh } = useExpenses();
-
-  // Undo state
-  const [undoState, setUndoState] = useState<{
-    visible: boolean;
-    message: string;
-    deletedId: string;
-    deletedAmount: number;
-  }>({ visible: false, message: "", deletedId: "", deletedAmount: 0 });
-  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { categories } = useCategories();
+  const {
+    expenses,
+    todayTotal,
+    addExpense,
+    deleteExpense,
+    undoVisible,
+    undoDelete,
+    dismissUndo,
+  } = useExpenses();
 
   const categoryMap = useMemo(() => {
     const map = new Map<string, Category>();
@@ -37,12 +36,10 @@ export default function HomeScreen() {
     setAmount((prev) => {
       if (key === "⌫") return prev.slice(0, -1);
       if (key === ".") return prev.includes(".") ? prev : prev + ".";
-      // Max 2 decimal places
       if (prev.includes(".")) {
         const [, decimals] = prev.split(".");
         if (decimals.length >= 2) return prev;
       }
-      // Max total length
       if (prev.replace(".", "").length >= 8) return prev;
       return prev + key;
     });
@@ -58,38 +55,10 @@ export default function HomeScreen() {
         categoryId: category.id,
       });
 
-      // Reset amount with a little haptic feel
       setAmount("");
     },
     [amount, addExpense],
   );
-
-  const handleDelete = useCallback(
-    (id: string, amountCents: number) => {
-      if (undoTimer.current) clearTimeout(undoTimer.current);
-
-      deleteExpense(id, amountCents);
-      setUndoState({
-        visible: true,
-        message: "Expense deleted",
-        deletedId: id,
-        deletedAmount: amountCents,
-      });
-    },
-    [deleteExpense],
-  );
-
-  const handleUndo = useCallback(async () => {
-    // Re-add the expense (simplest undo: add it back)
-    // For a real undo, we'd store the full expense data
-    // For now, just refresh from DB
-    await refresh();
-    setUndoState((prev) => ({ ...prev, visible: false }));
-  }, [refresh]);
-
-  const handleDismiss = useCallback(() => {
-    setUndoState((prev) => ({ ...prev, visible: false }));
-  }, []);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -106,22 +75,22 @@ export default function HomeScreen() {
           />
         </View>
 
-        {/* Expense list */}
+        {/* Expense list with swipe-to-delete */}
         <View style={styles.listSection}>
           <ExpenseList
             expenses={expenses}
             categoryMap={categoryMap}
-            onDelete={handleDelete}
+            onDelete={deleteExpense}
           />
         </View>
 
         {/* Undo toast */}
         <View style={styles.toastContainer}>
           <UndoToast
-            visible={undoState.visible}
-            message={undoState.message}
-            onUndo={handleUndo}
-            onDismiss={handleDismiss}
+            visible={undoVisible}
+            message="Expense deleted"
+            onUndo={undoDelete}
+            onDismiss={dismissUndo}
           />
         </View>
 

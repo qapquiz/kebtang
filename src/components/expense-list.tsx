@@ -1,14 +1,14 @@
 import { View, Text, FlatList, StyleSheet } from "react-native";
 import type { Expense } from "../lib/domain/expense";
 import type { Category } from "../lib/domain/category";
-import { ExpenseItem } from "./expense-item";
+import { SwipeableExpenseItem } from "./expense-item";
 import { Spacing } from "../constants/theme";
 import { useTheme } from "../hooks/use-theme";
 
 interface ExpenseListProps {
   expenses: ReadonlyArray<Expense>;
   categoryMap: Map<string, Category>;
-  onDelete: (id: string, amountCents: number) => void;
+  onDelete: (expense: Expense) => void;
 }
 
 export function ExpenseList({ expenses, categoryMap, onDelete }: ExpenseListProps) {
@@ -29,7 +29,7 @@ export function ExpenseList({ expenses, categoryMap, onDelete }: ExpenseListProp
       data={expenses as Expense[]}
       keyExtractor={(item) => item.id}
       renderItem={({ item }) => (
-        <ExpenseItem
+        <SwipeableExpenseItem
           expense={item}
           category={categoryMap.get(item.categoryId)}
           onDelete={onDelete}

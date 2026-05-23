@@ -1,10 +1,15 @@
-import { useMemo } from "react";
-import { Text, View, FlatList, StyleSheet } from "react-native";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { Text, View, FlatList, ActivityIndicator, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Effect } from "effect";
 
-import { ExpenseItem } from "../components/expense-item";
+import { SwipeableExpenseItem } from "../components/expense-item";
+import { UndoToast } from "../components/undo-toast";
 import { useCategories } from "../hooks/use-categories";
-import { useExpenses } from "../hooks/use-expenses";
+import { useExpenseHistory, type DayGroup } from "../hooks/use-expense-history";
+import { runEffect } from "../lib/runtime";
+import { ExpenseRepository } from "../lib/services/expense-repository";
+import type { Expense } from "../lib/domain/expense";
 import type { Category } from "../lib/domain/category";
 import { centsToDisplay } from "../lib/domain/expense";
 import { Spacing, BottomTabInset, MaxContentWidth } from "../constants/theme";
@@ -13,7 +18,12 @@ import { useTheme } from "../hooks/use-theme";
 export default function HistoryScreen() {
   const theme = useTheme();
   const { categories } = useCategories();
-  const { expenses, deleteExpense } = useExpenses();
+  const { groups, loading, refresh } = useExpenseHistory(30);
+
+  // Undo state
+  const [undoVisible, setUndoVisible] = useState(false);
+  const deletedRef = useRef<Expense | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const categoryMap = useMemo(() => {
     const map = new Map<string, Category>();
@@ -21,52 +31,154 @@ export default function HistoryScreen() {
     return map;
   }, [categories]);
 
-  // Group by date
-  const grouped = useMemo(() => {
-    const groups = new Map<string, Array<(typeof expenses)[number]>>();
-    for (const exp of expenses) {
-      const key = new Date(exp.date).toLocaleDateString("en-US", {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-      });
-      const existing = groups.get(key) ?? [];
-      existing.push(exp);
-      groups.set(key, existing);
+  const handleDelete = useCallback(
+    (expense: Expense) => {
+      deletedRef.current = expense;
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+
+      // Delete from DB
+      runEffect(
+        Effect.gen(function* (_) {
+          const repo = yield* _(ExpenseRepository);
+          yield* _(repo.deleteById(expense.id));
+        }),
+      ).catch(console.error);
+
+      // Remove from groups optimistically
+      setGroups((prev) =>
+        prev
+          .map((g) => ({
+            ...g,
+            items: g.items.filter((e) => e.id !== expense.id),
+          }))
+          .filter((g) => g.items.length > 0)
+          .map((g) => ({
+            ...g,
+            total: g.items.reduce((sum, e) => sum + e.amountCents, 0),
+          })),
+      );
+
+      setUndoVisible(true);
+      undoTimerRef.current = setTimeout(() => {
+        setUndoVisible(false);
+        deletedRef.current = null;
+      }, 4000);
+    },
+    [],
+  );
+
+  // Need groups as state for optimistic updates
+  const [groupsState, setGroups] = useState<ReadonlyArray<DayGroup>>([]);
+  const displayGroups = groupsState.length > 0 || groups !== groupsState ? groupsState : groups;
+
+  // Sync from hook
+  const syncedRef = useRef(false);
+  if (groups.length > 0 && !syncedRef.current) {
+    setGroups(groups);
+    syncedRef.current = true;
+  }
+  if (loading) syncedRef.current = false;
+
+  const handleUndo = useCallback(async () => {
+    const deleted = deletedRef.current;
+    if (!deleted) return;
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+
+    try {
+      await runEffect(
+        Effect.gen(function* (_) {
+          const repo = yield* _(ExpenseRepository);
+          yield* _(
+            repo.add({
+              amountCents: deleted.amountCents,
+              categoryId: deleted.categoryId,
+              note: deleted.note,
+              date: deleted.date,
+            }),
+          );
+        }),
+      );
+    } catch (e) {
+      console.error("Undo failed:", e);
     }
-    return Array.from(groups.entries()).map(([date, items]) => ({
-      date,
-      items,
-      total: items.reduce((sum, e) => sum + e.amountCents, 0),
-    }));
-  }, [expenses]);
+
+    // Just refresh to get clean state
+    syncedRef.current = false;
+    await refresh();
+    setUndoVisible(false);
+    deletedRef.current = null;
+  }, [refresh]);
+
+  const dismissUndo = useCallback(() => {
+    setUndoVisible(false);
+    deletedRef.current = null;
+  }, []);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={theme.text} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const totalSpent = displayGroups.reduce((sum, g) => sum + g.total, 0);
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-        <Text style={[styles.title, { color: theme.text }]}>History</Text>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: theme.text }]}>History</Text>
+          <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
+            Last 30 days · {centsToDisplay(totalSpent)}
+          </Text>
+        </View>
+
+        {/* Day groups */}
         <FlatList
-          data={grouped}
-          keyExtractor={(item) => item.date}
+          data={displayGroups as DayGroup[]}
+          keyExtractor={(item) => item.dateKey}
           renderItem={({ item }) => (
             <View style={styles.dayGroup}>
               <View style={styles.dayHeader}>
-                <Text style={[styles.dayLabel, { color: theme.text }]}>{item.date}</Text>
+                <Text style={[styles.dayLabel, { color: theme.text }]}>
+                  {item.label}
+                </Text>
                 <Text style={[styles.dayTotal, { color: theme.textSecondary }]}>
                   {centsToDisplay(item.total)}
                 </Text>
               </View>
-              {item.items.map((expense) => (
-                <ExpenseItem
-                  key={expense.id}
-                  expense={expense}
-                  category={categoryMap.get(expense.categoryId)}
-                  onDelete={deleteExpense}
-                />
-              ))}
+              <View style={styles.dayItems}>
+                {item.items.map((expense) => (
+                  <SwipeableExpenseItem
+                    key={expense.id}
+                    expense={expense}
+                    category={categoryMap.get(expense.categoryId)}
+                    onDelete={handleDelete}
+                  />
+                ))}
+              </View>
             </View>
           )}
           contentContainerStyle={styles.listContent}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
+                No expenses in the last 30 days.
+              </Text>
+            </View>
+          }
+        />
+
+        {/* Undo */}
+        <UndoToast
+          visible={undoVisible}
+          message="Expense deleted"
+          onUndo={handleUndo}
+          onDismiss={dismissUndo}
         />
       </View>
     </SafeAreaView>
@@ -82,26 +194,37 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     maxWidth: MaxContentWidth,
-    paddingHorizontal: Spacing.three,
+  },
+  center: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  header: {
+    paddingHorizontal: Spacing.four,
+    paddingTop: Spacing.three,
+    paddingBottom: Spacing.two,
+    gap: Spacing.one,
   },
   title: {
     fontSize: 28,
     fontWeight: "700",
     fontFamily: "system-ui",
-    paddingTop: Spacing.three,
-    paddingBottom: Spacing.two,
+  },
+  subtitle: {
+    fontSize: 14,
+    fontFamily: "system-ui",
   },
   listContent: {
-    paddingBottom: BottomTabInset + Spacing.three,
+    paddingBottom: BottomTabInset + Spacing.six,
   },
   dayGroup: {
-    gap: Spacing.one,
     marginBottom: Spacing.three,
   },
   dayHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingHorizontal: Spacing.three,
+    paddingHorizontal: Spacing.four,
     paddingVertical: Spacing.one,
   },
   dayLabel: {
@@ -110,6 +233,18 @@ const styles = StyleSheet.create({
     fontFamily: "system-ui",
   },
   dayTotal: {
+    fontSize: 14,
+    fontFamily: "system-ui",
+  },
+  dayItems: {
+    gap: Spacing.one,
+    paddingHorizontal: Spacing.three,
+  },
+  empty: {
+    alignItems: "center",
+    paddingVertical: Spacing.six,
+  },
+  emptyText: {
     fontSize: 14,
     fontFamily: "system-ui",
   },

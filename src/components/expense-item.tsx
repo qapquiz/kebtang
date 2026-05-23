@@ -1,56 +1,158 @@
+import { useCallback, useMemo } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+  runOnJS,
+  type SharedValue,
+  interpolate,
+  Extrapolation,
+} from "react-native-reanimated";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import type { Expense } from "../lib/domain/expense";
 import type { Category } from "../lib/domain/category";
 import { centsToDisplay } from "../lib/domain/expense";
 import { Spacing } from "../constants/theme";
 import { useTheme } from "../hooks/use-theme";
 
-interface ExpenseItemProps {
+const DELETE_WIDTH = 80;
+const THRESHOLD = 50;
+
+interface SwipeableExpenseItemProps {
   expense: Expense;
   category: Category | undefined;
-  onDelete: (id: string, amountCents: number) => void;
+  onDelete: (expense: Expense) => void;
 }
 
-export function ExpenseItem({ expense, category, onDelete }: ExpenseItemProps) {
+export function SwipeableExpenseItem({ expense, category, onDelete }: SwipeableExpenseItemProps) {
   const theme = useTheme();
+  const translateX = useSharedValue(0);
+  const itemHeight = useSharedValue(-1); // -1 = not measured yet
+
   const time = new Date(expense.date).toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
   });
 
+  const triggerDelete = useCallback(() => {
+    onDelete(expense);
+  }, [expense, onDelete]);
+
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-20, 20])
+        .failOffsetY([-10, 10])
+        .onUpdate((event) => {
+          // Only allow swiping left
+          if (event.translationX < 0) {
+            translateX.value = Math.max(event.translationX, -DELETE_WIDTH - 20);
+          }
+        })
+        .onEnd(() => {
+          if (translateX.value < -THRESHOLD) {
+            translateX.value = withSpring(-DELETE_WIDTH, { damping: 20 });
+          } else {
+            translateX.value = withSpring(0, { damping: 20 });
+          }
+        }),
+    [translateX],
+  );
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+
+  const deleteBgStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      translateX.value,
+      [0, -DELETE_WIDTH],
+      [0, 1],
+      Extrapolation.CLAMP,
+    ),
+    width: Math.abs(translateX.value),
+  }));
+
+  const onLayout = useCallback(
+    (e: { nativeEvent: { layout: { height: number } } }) => {
+      itemHeight.value = e.nativeEvent.layout.height;
+    },
+    [itemHeight],
+  );
+
   return (
-    <Pressable
-      onLongPress={() => onDelete(expense.id, expense.amountCents)}
-      delayLongPress={500}
-      style={({ pressed }) => [
-        styles.container,
-        { backgroundColor: theme.backgroundElement },
-        pressed && styles.pressed,
-      ]}
-      accessibilityRole="button"
-      accessibilityLabel={`${category?.emoji ?? "📦"} ${centsToDisplay(expense.amountCents)}${expense.note ? ` ${expense.note}` : ""}. Long press to delete.`}
-    >
-      <Text style={styles.emoji}>{category?.emoji ?? "📦"}</Text>
-      <View style={styles.details}>
-        {expense.note ? (
-          <Text style={[styles.note, { color: theme.text }]} numberOfLines={1}>
-            {expense.note}
+    <View onLayout={onLayout} style={styles.outer}>
+      {/* Delete button underneath */}
+      <Animated.View style={[styles.deleteBg, deleteBgStyle]}>
+        <Pressable
+          onPress={triggerDelete}
+          style={styles.deleteButton}
+          accessibilityRole="button"
+          accessibilityLabel="Delete expense"
+        >
+          <Text style={styles.deleteIcon}>🗑️</Text>
+        </Pressable>
+      </Animated.View>
+
+      {/* Main content — swipeable */}
+      <GestureDetector gesture={pan}>
+        <Animated.View
+          style={[
+            styles.container,
+            { backgroundColor: theme.backgroundElement },
+            animStyle,
+          ]}
+        >
+          <Text style={styles.emoji}>{category?.emoji ?? "📦"}</Text>
+          <View style={styles.details}>
+            {expense.note ? (
+              <Text style={[styles.note, { color: theme.text }]} numberOfLines={1}>
+                {expense.note}
+              </Text>
+            ) : (
+              <Text style={[styles.note, { color: theme.textSecondary }]}>
+                {category?.name ?? "Unknown"}
+              </Text>
+            )}
+            <Text style={[styles.time, { color: theme.textSecondary }]}>{time}</Text>
+          </View>
+          <Text style={[styles.amount, { color: theme.text }]}>
+            {centsToDisplay(expense.amountCents)}
           </Text>
-        ) : (
-          <Text style={[styles.note, { color: theme.textSecondary }]}>
-            {category?.name ?? "Unknown"}
-          </Text>
-        )}
-        <Text style={[styles.time, { color: theme.textSecondary }]}>{time}</Text>
-      </View>
-      <Text style={[styles.amount, { color: theme.text }]}>
-        {centsToDisplay(expense.amountCents)}
-      </Text>
-    </Pressable>
+        </Animated.View>
+      </GestureDetector>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  outer: {
+    position: "relative",
+    overflow: "hidden",
+    borderRadius: Spacing.two,
+  },
+  deleteBg: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "flex-end",
+    backgroundColor: "#FF3B30",
+    borderTopRightRadius: Spacing.two,
+    borderBottomRightRadius: Spacing.two,
+  },
+  deleteButton: {
+    width: DELETE_WIDTH,
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  deleteIcon: {
+    fontSize: 20,
+  },
   container: {
     flexDirection: "row",
     alignItems: "center",
@@ -58,9 +160,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two,
     borderRadius: Spacing.two,
     gap: Spacing.three,
-  },
-  pressed: {
-    opacity: 0.6,
   },
   emoji: {
     fontSize: 22,
